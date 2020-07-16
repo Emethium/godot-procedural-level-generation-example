@@ -2,12 +2,15 @@ extends Node2D
 
 const Room = preload("res://Room.tscn")
 
-const tile_size = 32
+const tile_size = 64
 const num_rooms = 50
 const min_room_size = 4
 const max_room_size = 10
 const horizontal_spread = 400
 const room_strip_rate = 0.5
+
+onready var Map = $TileMap
+enum Tile { Purple_Background, Rocky_Background, Tiled_BackGround, Brown_Block, Grassy_Block, Purple_Block }
 
 # AStar pathfinding object
 var path
@@ -19,7 +22,7 @@ func _ready():
 func _draw():
 	for room in $Rooms.get_children():
 		draw_rect(Rect2(room.position - room.size, room.size * 2),
-				Color(32, 228, 0), false)
+				Color(0, 1, 0), false)
 	if path:
 		for point in path.get_points():
 			for connection in path.get_point_connections(point):
@@ -35,6 +38,8 @@ func _input(event):
 	if event.is_action_pressed('ui_select'):
 		clear_rooms()
 		create_rooms()
+	if event.is_action_pressed("ui_focus_next"):
+		create_map()
 		
 	
 func create_rooms():
@@ -58,6 +63,7 @@ func create_rooms():
 func clear_rooms():
 	for room in $Rooms.get_children():
 		room.queue_free()
+	path = null
 
 func strip_rooms_and_return_positions():
 	var added_room_coordinates = []
@@ -95,3 +101,67 @@ func find_minimum_spanning_tree(nodes):
 	
 	return path
 	
+func create_map():
+	Map.clear()
+	
+	setup_map_walls()
+
+
+func setup_map_walls():
+	var map_outline = Rect2()
+	for room in $Rooms.get_children():
+		var rectangle = Rect2(room.position - room.size,
+							room.get_node("CollisionShape2D").shape.extents * 2)
+		map_outline = map_outline.merge(rectangle)
+	
+	var map_topleft = Map.world_to_map(map_outline.position)
+	var map_bottomright = Map.world_to_map(map_outline.end)
+	for x in range(map_topleft.x, map_bottomright.x):
+		for y in range(map_topleft.y, map_bottomright.y):
+			Map.set_cell(x, y, Tile.Purple_Background)
+			
+	carve_rooms()
+
+
+func carve_rooms():
+	var corridors = []
+	for room in $Rooms.get_children():
+		var size = (room.size / tile_size).floor()
+		var position = Map.world_to_map(room.position)
+		var upper_left = (room.position / tile_size).floor() - size
+		
+		for x in range(2, size.x * 2 - 1):
+			for y in range(2, size.y * 2 - 1):
+				Map.set_cell(upper_left.x + x, upper_left.y + y, Tile.Brown_Block)
+				
+		# Carve connecting corridors
+		var point = path.get_closest_point(Vector2(room.position.x, room.position.y))
+		for connection in path.get_point_connections(point):
+			if not connection in corridors:
+				var start = Map.world_to_map(Vector2(path.get_point_position(point).x,
+												path.get_point_position(point).y))
+				var end = Map.world_to_map(Vector2(path.get_point_position(connection).x,
+												path.get_point_position(connection).y))
+				carve_path(start, end)
+		corridors.append(point)
+		
+func carve_path(pos1, pos2):
+	# Carve a path between two points
+	var x_diff = sign(pos2.x - pos1.x)
+	var y_diff = sign(pos2.y - pos1.y)
+	if x_diff == 0: x_diff = pow(-1.0, randi() % 2)
+	if y_diff == 0: y_diff = pow(-1.0, randi() % 2)
+	# choose either x/y or y/x
+	var x_y = pos1
+	var y_x = pos2
+	if (randi() % 2) > 0:
+		x_y = pos2
+		y_x = pos1	
+	for x in range(pos1.x, pos2.x, x_diff):
+		Map.set_cell(x, x_y.y, Tile.Brown_Block)
+		Map.set_cell(x, x_y.y + y_diff, Tile.Brown_Block)  # widen the corridor
+	for y in range(pos1.y, pos2.y, y_diff):
+		Map.set_cell(y_x.x, y, Tile.Brown_Block)
+		Map.set_cell(y_x.x + x_diff, y, Tile.Brown_Block)
+		
+		
